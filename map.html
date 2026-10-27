@@ -15,6 +15,7 @@ html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
 #form button { flex: 1; padding: 10px; border: 0; border-radius: 6px; font: inherit; background: #1d4ed8; color: #fff; }
 #form button.cancel { background: #6b7280; }
 .dot { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #0008; }
+.ghost { opacity: .6; border-style: dashed; }
 .pin { border-radius: 4px; border: 2px solid #fff; box-shadow: 0 0 4px #0008; transform: rotate(45deg); }
 </style>
 </head>
@@ -22,7 +23,7 @@ html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
 <div id="map"></div>
 <div id="hint">Touche la carte pour poser un pin</div>
 <div id="form">
-  <select id="ty">
+  <select id="ty" onchange="ghostColor()">
     <option value="ennemi">Ennemi</option>
     <option value="allie">Allié</option>
     <option value="objectif">Objectif</option>
@@ -82,11 +83,27 @@ function load() {
   }).catch(function () {});
 }
 
+var ghost = null; // aperçu du pin en cours de pose : visible seulement sur ton téléphone, jamais envoyé au serveur
+function ghostIcon() { return icon('pin ghost', COL[document.getElementById('ty').value] || COL.autre, 20); }
+function ghostColor() { if (ghost) ghost.setIcon(ghostIcon()); }
 map.on('click', function (e) {
   pending = e.latlng;
-  document.getElementById('form').style.display = 'flex';
+  if (!ghost) {
+    ghost = L.marker(pending, { icon: ghostIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
+    ghost.on('dragend', function () { pending = ghost.getLatLng(); });
+  } else ghost.setLatLng(pending);
+  var f = document.getElementById('form');
+  f.style.display = 'flex';
+  document.getElementById('hint').textContent = 'Glisse le point pour l’ajuster';
+  var limit = map.getSize().y - f.offsetHeight - 30, y = map.latLngToContainerPoint(pending).y;
+  if (y > limit) map.panBy([0, y - limit]); // garde le point visible au-dessus du formulaire
 });
-function hide() { document.getElementById('form').style.display = 'none'; pending = null; }
+function hide() {
+  document.getElementById('form').style.display = 'none';
+  document.getElementById('hint').textContent = 'Touche la carte pour poser un pin';
+  if (ghost) { map.removeLayer(ghost); ghost = null; }
+  pending = null;
+}
 function add() {
   var t = document.getElementById('t').value.trim();
   if (!t || !pending) return;
