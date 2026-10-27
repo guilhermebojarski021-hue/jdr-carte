@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Carte du jeu</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+#map { height: 100%; }
+#hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 900; background: #fffe; color: #222; padding: 6px 12px; border-radius: 16px; font-size: 13px; pointer-events: none; }
+#form { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; flex-direction: column; gap: 8px; padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); background: #fff; color: #111; box-shadow: 0 -2px 12px #0005; }
+#form input, #form select, #form textarea { font: inherit; padding: 8px; border: 1px solid #bbb; border-radius: 6px; background: #fff; color: #111; }
+#form .row { display: flex; gap: 8px; }
+#form button { flex: 1; padding: 10px; border: 0; border-radius: 6px; font: inherit; background: #1d4ed8; color: #fff; }
+#form button.cancel { background: #6b7280; }
+.dot { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #0008; }
+.ghost { opacity: .6; border-style: dashed; }
+.pin { border-radius: 4px; border: 2px solid #fff; box-shadow: 0 0 4px #0008; transform: rotate(45deg); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="hint">Touche la carte pour poser un pin</div>
+<div id="form">
+  <select id="ty" onchange="ghostColor()">
+    <option value="ennemi">Ennemi</option>
+    <option value="allie">Allié</option>
+    <option value="objectif">Objectif</option>
+    <option value="autre">Autre</option>
+  </select>
+  <input id="t" placeholder="Titre" maxlength="80">
+  <textarea id="d" rows="3" placeholder="Infos (description, habitudes, indices…)"></textarea>
+  <div class="row"><button onclick="add()">Poser le pin</button><button class="cancel" onclick="hide()">Annuler</button></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var K = new URLSearchParams(location.search).get('key') || '';
+var Q = '?key=' + encodeURIComponent(K);
+var COL = { ennemi: '#dc2626', allie: '#16a34a', objectif: '#eab308', autre: '#6b7280' };
+var map = L.map('map').setView([46.6, 2.4], 6);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+var players = L.layerGroup().addTo(map), pins = L.layerGroup().addTo(map);
+var first = true, lastPins = '', pending = null;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function ago(t) {
+  var m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? 'à l’instant' : m < 60 ? 'il y a ' + m + ' min' : 'il y a ' + Math.round(m / 60) + ' h';
+}
+function icon(cls, c, s) {
+  return L.divIcon({ className: '', iconSize: [s, s], html: '<div class="' + cls + '" style="width:' + s + 'px;height:' + s + 'px;background:' + c + '"></div>' });
+}
+
+function load() {
+  fetch('/api' + Q).then(function (r) { return r.json(); }).then(function (d) {
+    var pts = [];
+    players.clearLayers();
+    Object.keys(d.players).forEach(function (n) {
+      var p = d.players[n];
+      pts.push([p.lat, p.lon]);
+      L.marker([p.lat, p.lon], { icon: icon('dot', '#2563eb', 18) })
+        .bindTooltip(esc(n) + ' (' + ago(p.t) + ')', { permanent: true, direction: 'top', offset: [0, -10] })
+        .addTo(players);
+    });
+    var snap = JSON.stringify(d.pins);
+    if (snap !== lastPins) { // on ne redessine les pins que s’ils changent (garde les popups ouverts)
+      lastPins = snap;
+      pins.clearLayers();
+      d.pins.forEach(function (p) {
+        var html = '<b>' + esc(p.title) + '</b><br>' + esc(p.desc).replace(/\n/g, '<br>') +
+          '<br><br><a href="#" onclick="del(\'' + p.id + '\');return false">Supprimer</a>';
+        L.marker([p.lat, p.lon], { icon: icon('pin', COL[p.type] || COL.autre, 16) }).bindPopup(html).addTo(pins);
+      });
+    }
+    d.pins.forEach(function (p) { pts.push([p.lat, p.lon]); });
+    if (first && pts.length) { map.fitBounds(pts, { maxZoom: 16, padding: [40, 40] }); first = false; }
+  }).catch(function () {});
+}
+
+var ghost = null; // aperçu du pin en cours de pose : visible seulement sur ton téléphone, jamais envoyé au serveur
+function ghostIcon() { return icon('pin ghost', COL[document.getElementById('ty').value] || COL.autre, 20); }
+function ghostColor() { if (ghost) ghost.setIcon(ghostIcon()); }
+map.on('click', function (e) {
+  pending = e.latlng;
+  if (!ghost) {
+    ghost = L.marker(pending, { icon: ghostIcon(), draggable: true, zIndexOffset: 1000 }).addTo(map);
+    ghost.on('dragend', function () { pending = ghost.getLatLng(); });
+  } else ghost.setLatLng(pending);
+  var f = document.getElementById('form');
+  f.style.display = 'flex';
+  document.getElementById('hint').textContent = 'Glisse le point pour l’ajuster';
+  var limit = map.getSize().y - f.offsetHeight - 30, y = map.latLngToContainerPoint(pending).y;
+  if (y > limit) map.panBy([0, y - limit]); // garde le point visible au-dessus du formulaire
+});
+function hide() {
+  document.getElementById('form').style.display = 'none';
+  document.getElementById('hint').textContent = 'Touche la carte pour poser un pin';
+  if (ghost) { map.removeLayer(ghost); ghost = null; }
+  pending = null;
+}
+function add() {
+  var t = document.getElementById('t').value.trim();
+  if (!t || !pending) return;
+  fetch('/pin' + Q, {
+    method: 'POST',
+    body: JSON.stringify({ lat: pending.lat, lon: pending.lng, type: document.getElementById('ty').value, title: t, desc: document.getElementById('d').value })
+  }).then(function () {
+    document.getElementById('t').value = '';
+    document.getElementById('d').value = '';
+    hide(); load();
+  });
+}
+function del(id) {
+  if (confirm('Supprimer ce pin ?')) fetch('/pin' + Q + '&id=' + id, { method: 'DELETE' }).then(load);
+}
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>
