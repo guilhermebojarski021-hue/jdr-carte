@@ -64,13 +64,23 @@ function handler(req, res) {
         return reply(res, 200, []);
       }
       if (req.method === 'POST' && p === '/pin') {
-        const d = JSON.parse(raw);
+        const d = JSON.parse(raw), id = Date.now().toString(36);
         db.pins.push({
-          id: Date.now().toString(36), lat: +d.lat, lon: +d.lon,
+          id, lat: +d.lat, lon: +d.lon,
           type: d.type || 'autre',
           title: String(d.title || '').slice(0, 80),
           desc: String(d.desc || '').slice(0, 1000)
         });
+        save(true);
+        return reply(res, 200, { ok: true, id });
+      }
+      if (req.method === 'PUT' && p === '/pin') { // modifier un pin
+        const d = JSON.parse(raw), pin = db.pins.find(x => x.id === url.searchParams.get('id'));
+        if (!pin) return reply(res, 404, { error: 'pin introuvable' });
+        if (isFinite(+d.lat) && isFinite(+d.lon)) { pin.lat = +d.lat; pin.lon = +d.lon; }
+        pin.type = d.type || pin.type;
+        pin.title = String(d.title == null ? pin.title : d.title).slice(0, 80);
+        pin.desc = String(d.desc == null ? pin.desc : d.desc).slice(0, 1000);
         save(true);
         return reply(res, 200, { ok: true });
       }
