@@ -16,6 +16,19 @@ html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
 #form button { flex: 1; padding: 10px; border: 0; border-radius: 6px; font: inherit; background: #1d4ed8; color: #fff; }
 #form button.cancel { background: #6b7280; }
 .dot { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #0008; width: 18px; height: 18px; background: #2563eb; }
+.dot.me { background: #16a34a; }
+.dot.find { background: #facc15; border-color: #111; box-shadow: 0 0 0 5px #facc1599; animation: halo 1.4s infinite; }
+@keyframes halo { 50% { box-shadow: 0 0 0 9px #facc1555; } }
+#bar2 { position: fixed; left: 10px; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); z-index: 900; display: flex; flex-wrap: wrap; gap: 8px; max-width: calc(100vw - 20px); }
+#bar2 button { border: 0; border-radius: 16px; padding: 9px 14px; font: 14px system-ui, sans-serif; background: #fffe; color: #222; box-shadow: 0 1px 5px #0006; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pl { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100; flex-direction: column; gap: 10px; max-height: 60vh; overflow: auto; padding: 14px 12px calc(14px + env(safe-area-inset-bottom, 0px)); background: #fff; color: #111; box-shadow: 0 -2px 12px #0005; }
+#plt { font-weight: 600; }
+#plc { display: flex; flex-wrap: wrap; gap: 8px; }
+#pl button { font: inherit; padding: 9px 14px; border: 1px solid #bbb; border-radius: 18px; background: #f3f4f6; color: #111; }
+#pl button.sel-me { background: #16a34a; border-color: #16a34a; color: #fff; }
+#pl button.sel-find { background: #facc15; border-color: #facc15; }
+#pl button.cancel { background: #6b7280; border-color: #6b7280; color: #fff; }
+@media (prefers-reduced-motion: reduce) { .dot.find { animation: none; } }
 .m { position: relative; width: 26px; height: 26px; box-sizing: border-box; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #0008; display: flex; align-items: center; justify-content: center; font-size: 14px; }
 .ghost { opacity: .6; border-style: dashed; }
 .bang { position: absolute; top: -9px; right: -9px; width: 16px; height: 16px; border-radius: 50%; background: #dc2626; color: #fff; font: bold 12px/16px system-ui, sans-serif; text-align: center; border: 1.5px solid #fff; animation: pulse 1.2s infinite; }
@@ -28,6 +41,8 @@ html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
 <div id="map"></div>
 <div id="hint">Touche la carte pour poser un pin</div>
 <button id="tt" onclick="toggleTitles()">Titres : oui</button>
+<div id="bar2"><button id="bme" onclick="openPl('me')"></button><button id="bfind" onclick="openPl('find')"></button></div>
+<div id="pl"><div id="plt"></div><div id="plc"></div><button class="cancel" onclick="closePl()">Fermer</button></div>
 <div id="form">
   <select id="ty" onchange="ghostColor()"></select>
   <input id="t" placeholder="Titre" maxlength="80">
@@ -50,7 +65,7 @@ var CAT = {
   autre:    { l: 'Autre', c: '#6b7280', e: '📍' }
 };
 var $ = function (id) { return document.getElementById(id); };
-var ty = $('ty'), ti = $('t'), de = $('d'), form = $('form'), hint = $('hint'), ok = $('ok');
+var ty = $('ty'), ti = $('t'), de = $('d'), form = $('form'), hint = $('hint'), ok = $('ok'), pl = $('pl'), plc = $('plc');
 ty.innerHTML = Object.keys(CAT).map(function (k) { return '<option value="' + k + '">' + CAT[k].l + '</option>'; }).join('');
 
 var map = L.map('map').setView([46.6, 2.4], 6);
@@ -59,6 +74,8 @@ var players = L.layerGroup().addTo(map), pins = L.layerGroup().addTo(map);
 var first = true, lastPins = '', pending = null, editing = null, ghost = null;
 var data = { players: {}, pins: [] }, byId = {}, titles = true, seen = [];
 try { seen = JSON.parse(localStorage.getItem('seen') || '[]'); } catch (e) {}
+var me = '', target = '', plMode = '';
+try { me = localStorage.getItem('me') || ''; } catch (e) {}
 
 function markSeen(id) { // un pin garde son « ! » sur ce téléphone jusqu’à ce qu’on l’ouvre
   if (seen.indexOf(id) < 0) {
@@ -99,18 +116,58 @@ function toggleTitles() {
   drawPins();
 }
 
+function drawPlayers() {
+  players.clearLayers();
+  Object.keys(data.players).forEach(function (n) {
+    var p = data.players[n], cls = n === target ? ' find' : n === me ? ' me' : '';
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], html: '<div class="dot' + cls + '"></div>' }), zIndexOffset: cls ? 1000 : 0 })
+      .bindTooltip(esc(n) + ' (' + ago(p.t) + ')', { permanent: true, direction: 'top', offset: [0, -10] })
+      .addTo(players);
+  });
+}
+function updBar() {
+  $('bme').textContent = me ? '🟢 Moi : ' + me : '🟢 Choisir mon pseudo';
+  $('bfind').textContent = target ? '🟡 ' + target : '🔎 Trouver';
+}
+function openPl(mode) {
+  plMode = mode;
+  var names = Object.keys(data.players).sort(function (a, b) { return a.localeCompare(b); });
+  $('plt').textContent = mode === 'me' ? 'Qui es-tu ?' : 'Qui veux-tu trouver ?';
+  plc.innerHTML = '';
+  if (!names.length) plc.textContent = 'Aucun joueur n’a encore envoyé sa position.';
+  names.forEach(function (n) {
+    var b = document.createElement('button');
+    b.className = (mode === 'me' && n === me) ? 'sel-me' : (mode === 'find' && n === target) ? 'sel-find' : '';
+    b.textContent = mode === 'find' ? n + ' · ' + ago(data.players[n].t) : n;
+    b.onclick = function () { pickPl(n); };
+    plc.appendChild(b);
+  });
+  if ((mode === 'me' && me) || (mode === 'find' && target)) {
+    var x = document.createElement('button');
+    x.className = 'cancel';
+    x.textContent = mode === 'me' ? 'Ce n’est pas moi' : 'Arrêter la recherche';
+    x.onclick = function () { pickPl(''); };
+    plc.appendChild(x);
+  }
+  pl.style.display = 'flex';
+}
+function closePl() { pl.style.display = 'none'; }
+function pickPl(n) {
+  if (plMode === 'me') { me = n; try { localStorage.setItem('me', n); } catch (e) {} }
+  else {
+    target = n;
+    var p = data.players[n];
+    if (n && p) map.setView([p.lat, p.lon], 18);
+  }
+  closePl(); drawPlayers(); updBar();
+}
+
 function load() {
   fetch('/api' + Q).then(function (r) { return r.json(); }).then(function (d) {
     var pts = [];
-    players.clearLayers();
-    Object.keys(d.players).forEach(function (n) {
-      var p = d.players[n];
-      pts.push([p.lat, p.lon]);
-      L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], html: '<div class="dot"></div>' }) })
-        .bindTooltip(esc(n) + ' (' + ago(p.t) + ')', { permanent: true, direction: 'top', offset: [0, -10] })
-        .addTo(players);
-    });
+    Object.keys(d.players).forEach(function (n) { pts.push([d.players[n].lat, d.players[n].lon]); });
     data = d;
+    drawPlayers();
     var snap = JSON.stringify(d.pins);
     if (snap !== lastPins) { lastPins = snap; drawPins(); } // on ne redessine que si les pins changent (garde les popups ouverts)
     d.pins.forEach(function (p) { pts.push([p.lat, p.lon]); });
@@ -131,7 +188,7 @@ function ghostShow(ll) {
   if (y > lim) map.panBy([0, y - lim]);
 }
 function ghostColor() { if (ghost) ghost.setIcon(mIcon(ty.value, false, true)); }
-map.on('click', function (e) { ghostShow(e.latlng); });
+map.on('click', function (e) { if (pl.style.display === 'flex') { closePl(); return; } ghostShow(e.latlng); });
 function hide() {
   form.style.display = 'none';
   hint.textContent = 'Touche la carte pour poser un pin';
@@ -147,19 +204,22 @@ function edit(id) {
   ghostShow(L.latLng(p.lat, p.lon));
 }
 function add() {
-  var t = ti.value.trim();
-  if (!t || !pending) return;
+  if (!pending) return;
+  var t = ti.value.trim() || (CAT[ty.value] || CAT.autre).l; // titre vide : on prend le nom de la catégorie
   var body = JSON.stringify({ lat: pending.lat, lon: pending.lng, type: ty.value, title: t, desc: de.value });
   var req = editing ? fetch('/pin' + Q + '&id=' + editing, { method: 'PUT', body: body }) : fetch('/pin' + Q, { method: 'POST', body: body });
-  req.then(function (r) { return r.json(); }).then(function (r) {
+  req.then(function (r) {
+    return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('erreur ' + r.status)); return j; });
+  }).then(function (r) {
     if (r.id) markSeen(r.id);
     hide(); load();
-  }).catch(function () { alert('Envoi impossible, réessaie dans un instant.'); });
+  }).catch(function (e) { alert('Envoi impossible : ' + (e.message || 'réessaie dans un instant.')); });
 }
 function del(id) {
   if (confirm('Supprimer ce pin ?')) fetch('/pin' + Q + '&id=' + id, { method: 'DELETE' }).then(load);
 }
 load();
+updBar();
 setInterval(load, 5000);
 </script>
 </body>
