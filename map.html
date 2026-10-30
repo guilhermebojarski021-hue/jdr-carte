@@ -165,6 +165,10 @@ function pickPl(n) {
 function load() {
   fetch('/api' + Q).then(function (r) { return r.json(); }).then(function (d) {
     var pts = [];
+    Object.keys(d.players).forEach(function (n) { // une position de plus de 3 h disparaît
+      if (Date.now() - d.players[n].t > 3 * 60 * 60 * 1000) delete d.players[n];
+    });
+    if (target && !d.players[target]) { target = ''; updBar(); }
     Object.keys(d.players).forEach(function (n) { pts.push([d.players[n].lat, d.players[n].lon]); });
     data = d;
     drawPlayers();

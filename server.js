@@ -36,6 +36,13 @@ function save(now) { // les positions sont groupées toutes les 5 s, les pins so
   if (now) return push();
   if (!timer) timer = setTimeout(push, 5000);
 }
+const MAX_AGE = 3 * 60 * 60 * 1000; // une position de plus de 3 h est effacée
+function prune() {
+  const now = Date.now();
+  for (const n of Object.keys(db.players))
+    if (now - db.players[n].t > MAX_AGE) { delete db.players[n]; save(false); }
+}
+setInterval(prune, 60000);
 const reply = (res, code, body, type) => {
   res.writeHead(code, { 'Content-Type': type || 'application/json' });
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
@@ -52,7 +59,7 @@ function handler(req, res) {
       const p = url.pathname;
       if (req.method === 'GET' && p === '/')
         return reply(res, 200, fs.readFileSync(__dirname + '/map.html', 'utf8'), 'text/html; charset=utf-8');
-      if (req.method === 'GET' && p === '/api') return reply(res, 200, db);
+      if (req.method === 'GET' && p === '/api') { prune(); return reply(res, 200, db); }
 
       if (req.method === 'POST' && p === '/pub') { // OwnTracks (mode HTTP)
         const d = JSON.parse(raw || '{}');
